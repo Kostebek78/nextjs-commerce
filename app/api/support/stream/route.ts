@@ -1,5 +1,5 @@
 import { getSupportSnapshot, subscribe } from 'lib/support';
-import { isAdminRequest } from '@/lib/support-auth';
+import { isAdminRequest } from '../../../../lib/support-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,34 +18,32 @@ export async function GET(request: Request) {
     async start(controller) {
       const send = async () => {
         const snapshot = await getSupportSnapshot();
-        const conversationId = visitorId ? `conv_${visitorId}` : '';
         const payload = admin
           ? snapshot
           : {
               visitors: [],
               agentOnline: snapshot.agentOnline,
-              conversations: snapshot.conversations.filter((conversation) => conversation.id === conversationId),
-              messages: snapshot.messages.filter((message) => message.conversationId === conversationId),
+              conversations: snapshot.conversations.filter((conversation) => conversation.id === `conv_${visitorId}`),
+              messages: snapshot.messages.filter((message) => message.conversationId === `conv_${visitorId}`),
             };
-        controller.enqueue(encoder.encode(`event: support\ndata: ${JSON.stringify(payload)}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
       };
 
       await send();
-      const unsubscribe = subscribe(() => { void send(); });
-      cleanup = () => {
-        unsubscribe();
-        try { controller.close(); } catch {}
-      };
+      cleanup = subscribe(() => {
+        void send();
+      });
     },
-    cancel() { cleanup(); },
+    cancel() {
+      cleanup();
+    },
   });
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
     },
   });
 }
