@@ -1,0 +1,80 @@
+body {
+  margin: 0;
+  font-family: Inter, system-ui, sans-serif;
+  background: #f6f7fb;
+  color: #14213d;
+}
+* {
+  box-sizing: border-box;
+}
+.card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  box-shadow: 0 12px 40px #0f172a10;
+}
+.btn {
+  background: #0f766e;
+  color: white;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 700;
+}
+.input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  padding: 12px;
+}
+.grid {
+  display: grid;
+  gap: 16px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
+}
+.side {
+  background: #102a43;
+  color: white;
+  padding: 24px;
+}
+.side a {
+  display: block;
+  color: white;
+  text-decoration: none;
+  padding: 12px;
+  border-radius: 12px;
+}
+.side a:hover {
+  background: #ffffff22;
+}
+.main {
+  padding: 24px;
+}
+.stat {
+  padding: 18px;
+}
+.muted {
+  color: #64748b;
+}
+.chat {
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  gap: 16px;
+  height: calc(100vh - 48px);
+}
+@media (max-width: 900px) {
+  .layout,
+  .chat {
+    grid-template-columns: 1fr;
+  }
+  .side {
+    position: static;
+  }
+  .chat {
+    height: auto;
+  }
+}

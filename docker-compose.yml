@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: temmuz_support
+      POSTGRES_USER: temmuz
+      POSTGRES_PASSWORD: temmuz_dev_password
+    ports: ['5432:5432']
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      {
+        test: ['CMD-SHELL', 'pg_isready -U temmuz -d temmuz_support'],
+        interval: 10s,
+        timeout: 5s,
+        retries: 5,
+      }
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+  api:
+    build: { context: ., dockerfile: Dockerfile.api }
+    environment:
+      DATABASE_URL: postgresql://temmuz:temmuz_dev_password@postgres:5432/temmuz_support
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: change-me-development-jwt-secret-32chars
+      SESSION_SECRET: change-me-development-session-secret-32chars
+      CORS_ORIGIN: http://localhost:3000,https://temmuzonline.com,https://support.temmuzonline.com
+      WIDGET_SITE_ID: temmuz-online
+      WHATSAPP_NUMBER: '905000000000'
+      PORT: 4000
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_started } }
+    ports: ['4000:4000']
+  admin:
+    build: { context: ., dockerfile: Dockerfile.admin }
+    environment: { API_URL: http://api:4000, NEXT_PUBLIC_API_URL: http://localhost:4000 }
+    depends_on: [api]
+    ports: ['3000:3000']
+  widget:
+    build: { context: ., dockerfile: Dockerfile.widget }
+    ports: ['8080:80']
+  nginx:
+    image: nginx:1.27-alpine
+    volumes: ['./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro']
+    depends_on: [api, admin, widget]
+    ports: ['80:80']
+volumes: { postgres_data: {} }

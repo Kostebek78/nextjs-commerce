@@ -1,0 +1,11 @@
+app/
+components/
+lib/
+next.config.ts
+postcss.config.mjs
+tsconfig.json
+pnpm-lock.yaml
+node_modules/
+.next/
+dist/
+coverage/
