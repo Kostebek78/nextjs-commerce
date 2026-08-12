@@ -1,11 +1,11 @@
-import { isAdmin } from '@/app/api/support/auth/route';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { isAdminRequest } from '@/lib/support-auth';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SupportAdminLayout({ children }: { children: React.ReactNode }) {
-  const headers = await import('next/headers');
-  const cookieStore = await headers.cookies();
+  const cookieStore = await cookies();
   const cookieHeader = cookieStore
     .getAll()
     .map((cookie) => `${cookie.name}=${cookie.value}`)
@@ -15,7 +15,7 @@ export default async function SupportAdminLayout({ children }: { children: React
     headers: { cookie: cookieHeader },
   });
 
-  if (!isAdmin(request)) redirect('/admin/login');
+  if (!isAdminRequest(request)) redirect('/admin/login');
 
   return children;
 }
