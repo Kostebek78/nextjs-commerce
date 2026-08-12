@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - work
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      COMPANY_NAME: Vercel Inc.
+      SITE_NAME: Next.js Commerce
+      SHOPIFY_REVALIDATION_SECRET: ci
+      SHOPIFY_STOREFRONT_ACCESS_TOKEN: ci
+      SHOPIFY_STORE_DOMAIN: ci.myshopify.com
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.28.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build

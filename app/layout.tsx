@@ -1,4 +1,5 @@
 import { CartProvider } from 'components/cart/cart-context';
+import { CustomerSupportWidget } from 'components/customer-support-widget';
 import { Navbar } from 'components/layout/navbar';
 import { WelcomeToast } from 'components/welcome-toast';
 import { GeistSans } from 'geist/font/sans';
@@ -39,6 +40,7 @@ export default async function RootLayout({
             {children}
             <Toaster closeButton />
             <WelcomeToast />
+            <CustomerSupportWidget />
           </main>
         </CartProvider>
       </body>
