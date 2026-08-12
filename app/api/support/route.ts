@@ -90,13 +90,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  if (!body.visitorId || !body.text?.trim()) return NextResponse.json({ error: 'Mesaj bilgisi eksik.' }, { status: 400 });
+  const visitorId = body.visitorId ?? (body.author === 'agent' && body.conversationId?.startsWith('conv_') ? body.conversationId.slice('conv_'.length) : '');
+  if (!visitorId || !body.text?.trim()) return NextResponse.json({ error: 'Mesaj bilgisi eksik.' }, { status: 400 });
   if (body.author === 'agent' && !admin) return NextResponse.json({ error: 'Yetkili girişi gerekli.' }, { status: 401 });
 
-  const conversationId = body.conversationId ?? `conv_${body.visitorId}`;
+  const conversationId = body.conversationId ?? `conv_${visitorId}`;
+  if (body.author !== 'agent' && conversationId !== `conv_${visitorId}`) {
+    return NextResponse.json({ error: 'Geçersiz konuşma.' }, { status: 403 });
+  }
+
   const message = await addMessage({
     conversationId,
-    visitorId: body.visitorId,
+    visitorId,
     author: body.author ?? 'customer',
     text: body.text.trim(),
     attachmentUrl: body.attachmentUrl,
