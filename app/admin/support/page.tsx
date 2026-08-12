@@ -1,12 +1,196 @@
 "use client";
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+
+import { BellAlertIcon, BellIcon, ChatBubbleLeftRightIcon, CheckIcon, ChevronLeftIcon, ClockIcon, PaperAirplaneIcon, PaperClipIcon, MagnifyingGlassIcon, UserGroupIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-type Visitor={id:string;name:string;pageUrl:string;pageTitle:string;online:boolean;lastSeenAt:string;conversationId:string}; type Conversation={id:string;visitorId:string;status:'open'|'pending'|'closed';unread:number;typing:boolean;updatedAt:string}; type Message={id:string;conversationId:string;author:'customer'|'agent';text:string;createdAt:string;attachmentUrl?:string;attachmentName?:string;attachmentType?:string};
-export default function SupportPage(){const router=useRouter();const[visitors,setVisitors]=useState<Visitor[]>([]);const[conversations,setConversations]=useState<Conversation[]>([]);const[messages,setMessages]=useState<Message[]>([]);const[selected,setSelected]=useState('');const[draft,setDraft]=useState('');const[online,setOnline]=useState(true);const[search,setSearch]=useState('');
-async function load(){const auth=await fetch('/api/support/auth').then(r=>r.json());if(!auth.authenticated){router.replace('/admin/login');return;}const d=await fetch('/api/support',{cache:'no-store'}).then(r=>r.json());setVisitors(d.visitors??[]);setConversations(d.conversations??[]);setMessages(d.messages??[]);}
-useEffect(()=>{load();const es=new EventSource('/api/support/stream');es.addEventListener('support',()=>load());return()=>es.close();},[]);
-const filtered=useMemo(()=>visitors.filter(v=>v.name.toLowerCase().includes(search.toLowerCase())||v.pageUrl.toLowerCase().includes(search.toLowerCase())),[visitors,search]);const current=visitors.find(v=>v.id===selected);const currentMessages=messages.filter(m=>m.conversationId===current?.conversationId);
-async function send(e:FormEvent){e.preventDefault();if(!draft.trim()||!current)return;await fetch('/api/support',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:current.conversationId,text:draft,author:'agent'})});setDraft('');}
-async function status(status:Conversation['status']){if(!current)return;await fetch('/api/support',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'status',conversationId:current.conversationId,status})});}
-async function logout(){await fetch('/api/support/auth',{method:'DELETE'});router.replace('/admin/login');}
-return <main className="min-h-screen bg-[#f5f7fb] text-neutral-900"><header className="flex h-16 items-center justify-between border-b bg-white px-4 md:px-6"><div><p className="text-xs font-semibold uppercase tracking-wider text-blue-600">Support Center</p><h1 className="text-lg font-bold">Canlı destek</h1></div><div className="flex items-center gap-3"><span className="hidden text-sm text-neutral-500 sm:inline">{online?'🟢 Çevrimiçi':'⚪ Mesai dışı'}</span><button onClick={()=>setOnline(!online)} className="rounded-lg border px-3 py-2 text-xs font-semibold">Mesaiyi {online?'kapat':'aç'}</button><button onClick={logout} className="rounded-lg border px-3 py-2 text-xs">Çıkış</button></div></header><div className="grid min-h-[calc(100vh-4rem)] md:grid-cols-[280px_1fr_280px]"><aside className="border-r bg-white"><div className="border-b p-4"><div className="mb-3 flex items-center justify-between"><h2 className="font-bold">Ziyaretçiler</h2><span className="rounded-full bg-green-50 px-2 py-1 text-xs font-semibold text-green-700">{visitors.filter(v=>v.online).length} online</span></div><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Ziyaretçi ara..." className="w-full rounded-xl border bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-blue-500"/></div><div className="max-h-[calc(100vh-10rem)] overflow-y-auto">{filtered.map(v=>{const c=conversations.find(x=>x.id===v.conversationId);return <button key={v.id} onClick={()=>setSelected(v.id)} className={`w-full border-b p-4 text-left ${selected===v.id?'bg-blue-50':'hover:bg-neutral-50'}`}><div className="flex items-center gap-3"><span className={`h-2.5 w-2.5 rounded-full ${v.online?'bg-green-500':'bg-neutral-300'}`}/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{v.name}</p><p className="truncate text-xs text-neutral-500">{v.pageTitle||v.pageUrl}</p></div>{c?.unread?<span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">{c.unread}</span>:null}</div><p className="mt-2 text-[11px] text-neutral-400">{v.online?'Şimdi aktif':`Son görülme ${new Date(v.lastSeenAt).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})}`}</p></button>})}{!filtered.length&&<p className="p-6 text-sm text-neutral-500">Henüz ziyaretçi yok.</p>}</div></aside><section className="flex min-h-[calc(100vh-4rem)] flex-col bg-white">{current?<><div className="flex items-center justify-between border-b px-5 py-4"><div><div className="flex items-center gap-2"><h2 className="font-bold">{current.name}</h2><span className={`h-2 w-2 rounded-full ${current.online?'bg-green-500':'bg-neutral-300'}`}/></div><p className="text-xs text-neutral-500">{current.pageTitle} · {current.pageUrl}</p></div><select value={conversations.find(c=>c.id===current.conversationId)?.status??'open'} onChange={e=>status(e.target.value as Conversation['status'])} className="rounded-lg border px-3 py-2 text-xs"><option value="open">Açık</option><option value="pending">Beklemede</option><option value="closed">Kapalı</option></select></div><div className="flex-1 space-y-4 overflow-y-auto p-5">{currentMessages.map(m=><div key={m.id} className={`flex ${m.author==='agent'?'justify-end':'justify-start'}`}><div className="max-w-[75%]"><p className={`rounded-2xl px-4 py-3 text-sm ${m.author==='agent'?'bg-blue-600 text-white':'bg-neutral-100'}`}>{m.text}</p>{m.attachmentUrl&&<a href={m.attachmentUrl} target="_blank" rel="noreferrer" className="mt-1 block text-xs text-blue-600">📎 {m.attachmentName||'Ek'}</a>}<p className="mt-1 text-[10px] text-neutral-400">{m.author==='agent'?'Siz':'Müşteri'} · {new Date(m.createdAt).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})}</p></div></div>)}{conversations.find(c=>c.id===current.conversationId)?.typing&&<p className="text-xs text-neutral-400">Müşteri yazıyor...</p>}</div><form onSubmit={send} className="flex gap-2 border-t p-4"><input value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Müşteriye cevap yaz..." className="min-w-0 flex-1 rounded-xl border bg-neutral-50 px-4 py-3 text-sm"/><button disabled={!draft.trim()} className="rounded-xl bg-blue-600 px-5 font-semibold text-white disabled:opacity-40">Gönder</button></form></>:<div className="flex flex-1 items-center justify-center text-sm text-neutral-500">Soldan bir ziyaretçi seçin.</div>}</section><aside className="hidden border-l bg-white p-5 md:block">{current?<><h3 className="font-bold">Ziyaretçi bilgileri</h3><div className="mt-5 space-y-4 text-sm"><div><p className="text-xs text-neutral-400">Durum</p><p>{current.online?'🟢 Online':'⚪ Offline'}</p></div><div><p className="text-xs text-neutral-400">Gezdiği sayfa</p><a className="break-all text-blue-600" href={current.pageUrl} target="_blank" rel="noreferrer">{current.pageUrl}</a></div><div><p className="text-xs text-neutral-400">Konuşma</p><p>{conversations.find(c=>c.id===current.conversationId)?.status}</p></div><div><p className="text-xs text-neutral-400">WhatsApp</p><a className="font-semibold text-green-600" href={`https://wa.me/${process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP||''}`} target="_blank" rel="noreferrer">WhatsApp'a yönlendir</a></div></div></>:<p className="text-sm text-neutral-500">Ziyaretçi seçilmedi.</p>}</aside></div></main>}
+
+type Visitor = { id: string; name: string; pageUrl: string; pageTitle: string; online: boolean; lastSeenAt: string; conversationId: string };
+type Conversation = { id: string; visitorId: string; status: 'open' | 'pending' | 'closed'; unread: number; customerTyping: boolean; agentTyping: boolean; updatedAt: string };
+type Message = { id: string; conversationId: string; author: 'customer' | 'agent'; text: string; createdAt: string; attachmentUrl?: string; attachmentName?: string; attachmentType?: string };
+type Filter = 'all' | 'online' | 'unread' | 'open' | 'pending';
+
+function playNotificationSound() {
+  try {
+    const context = new AudioContext();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.value = 880;
+    gain.gain.value = 0.04;
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.12);
+    window.setTimeout(() => void context.close(), 300);
+  } catch {}
+}
+
+export default function SupportPage() {
+  const router = useRouter();
+  const [visitors, setVisitors] = useState<Visitor[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [selected, setSelected] = useState('');
+  const [draft, setDraft] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [online, setOnline] = useState(true);
+  const [mobileDetails, setMobileDetails] = useState(false);
+  const [notificationEnabled, setNotificationEnabled] = useState(false);
+  const previousMessageIds = useRef<Set<string>>(new Set());
+  const initialLoad = useRef(true);
+
+  async function load() {
+    const auth = await fetch('/api/support/auth', { cache: 'no-store' }).then((response) => response.json());
+    if (!auth.authenticated) {
+      router.replace('/admin/login');
+      return;
+    }
+    const data = await fetch('/api/support', { cache: 'no-store' }).then((response) => response.json());
+    const nextMessages: Message[] = data.messages ?? [];
+    if (!initialLoad.current) {
+      const incoming = nextMessages.filter((message) => message.author === 'customer' && !previousMessageIds.current.has(message.id));
+      if (incoming.length) {
+        playNotificationSound();
+        if (notificationEnabled && 'Notification' in window && Notification.permission === 'granted') {
+          new Notification('Yeni canlı destek mesajı', { body: incoming[incoming.length - 1].text, tag: 'support-message' });
+        }
+        document.title = `(${incoming.length}) Yeni mesaj • Canlı Destek`;
+      }
+    }
+    previousMessageIds.current = new Set(nextMessages.map((message) => message.id));
+    initialLoad.current = false;
+    setVisitors(data.visitors ?? []);
+    setConversations(data.conversations ?? []);
+    setMessages(nextMessages);
+  }
+
+  useEffect(() => {
+    void load();
+    const eventSource = new EventSource('/api/support/stream');
+    eventSource.addEventListener('support', () => void load());
+    return () => eventSource.close();
+  }, [notificationEnabled]);
+
+  const conversationMap = useMemo(() => new Map(conversations.map((conversation) => [conversation.id, conversation])), [conversations]);
+  const current = visitors.find((visitor) => visitor.id === selected);
+  const currentConversation = current ? conversationMap.get(current.conversationId) : undefined;
+  const currentMessages = current ? messages.filter((message) => message.conversationId === current.conversationId) : [];
+  const latestByConversation = useMemo(() => {
+    const map = new Map<string, Message>();
+    messages.forEach((message) => map.set(message.conversationId, message));
+    return map;
+  }, [messages]);
+
+  const filtered = useMemo(() => visitors.filter((visitor) => {
+    const conversation = conversationMap.get(visitor.conversationId);
+    const needle = search.toLowerCase();
+    const matchesSearch = !needle || visitor.name.toLowerCase().includes(needle) || visitor.pageUrl.toLowerCase().includes(needle) || visitor.pageTitle.toLowerCase().includes(needle);
+    if (!matchesSearch) return false;
+    if (filter === 'online') return visitor.online;
+    if (filter === 'unread') return Boolean(conversation?.unread);
+    if (filter === 'open') return conversation?.status === 'open';
+    if (filter === 'pending') return conversation?.status === 'pending';
+    return true;
+  }), [visitors, conversationMap, search, filter]);
+
+  async function selectVisitor(visitor: Visitor) {
+    setSelected(visitor.id);
+    setMobileDetails(false);
+    await fetch('/api/support', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'read', conversationId: visitor.conversationId }) });
+    await load();
+  }
+
+  function updateDraft(value: string) {
+    setDraft(value);
+    if (current) void fetch('/api/support', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'typing', conversationId: current.conversationId, author: 'agent', typing: Boolean(value.trim()) }) });
+  }
+
+  async function send(e?: FormEvent) {
+    e?.preventDefault();
+    if (!current || (!draft.trim() && !file)) return;
+    let attachment: { attachmentUrl?: string; attachmentName?: string; attachmentType?: string } = {};
+    if (file) {
+      const form = new FormData();
+      form.append('file', file);
+      const upload = await fetch('/api/support/upload', { method: 'POST', body: form }).then((response) => response.json());
+      if (upload.url) attachment = { attachmentUrl: upload.url, attachmentName: upload.name, attachmentType: upload.type };
+    }
+    await fetch('/api/support', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversationId: current.conversationId, text: draft.trim() || (attachment.attachmentName ? `Ek gönderildi: ${attachment.attachmentName}` : ''), author: 'agent', ...attachment }) });
+    setDraft('');
+    setFile(null);
+  }
+
+  async function setStatus(status: Conversation['status']) {
+    if (!current) return;
+    await fetch('/api/support', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'status', conversationId: current.conversationId, status }) });
+    await load();
+  }
+
+  async function requestNotifications() {
+    if (!('Notification' in window)) return;
+    const permission = await Notification.requestPermission();
+    setNotificationEnabled(permission === 'granted');
+  }
+
+  async function logout() {
+    await fetch('/api/support/auth', { method: 'DELETE' });
+    router.replace('/admin/login');
+  }
+
+  const onlineCount = visitors.filter((visitor) => visitor.online).length;
+  const unreadCount = conversations.reduce((total, conversation) => total + conversation.unread, 0);
+
+  return (
+    <main className="min-h-screen bg-[#eef2f7] text-neutral-900">
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-white/95 px-3 backdrop-blur md:px-6">
+        <div className="flex items-center gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white"><ChatBubbleLeftRightIcon className="h-5 w-5" /></div><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-600">Support Center</p><h1 className="text-base font-bold md:text-lg">Canlı Destek</h1></div></div>
+        <div className="flex items-center gap-2">
+          <span className="hidden rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700 sm:inline">● {onlineCount} online</span>
+          <button onClick={() => setOnline(!online)} className="hidden rounded-lg border px-3 py-2 text-xs font-semibold md:inline">{online ? '🟢 Mesai açık' : '⚪ Mesai dışı'}</button>
+          <button onClick={() => void requestNotifications()} title="Bildirimleri aç" className="rounded-lg border p-2">{notificationEnabled ? <BellAlertIcon className="h-5 w-5 text-blue-600" /> : <BellIcon className="h-5 w-5" />}</button>
+          <button onClick={logout} className="rounded-lg border px-3 py-2 text-xs">Çıkış</button>
+        </div>
+      </header>
+
+      <div className="grid min-h-[calc(100vh-4rem)] grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_300px]">
+        <aside className={`${selected ? 'hidden md:block' : 'block'} border-r bg-white`}>
+          <div className="border-b p-4">
+            <div className="mb-3 flex items-center justify-between"><div><h2 className="font-bold">Ziyaretçiler</h2><p className="mt-0.5 text-xs text-neutral-400">Gerçek zamanlı ziyaretçi akışı</p></div><span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-bold text-green-700">{onlineCount}</span></div>
+            <div className="relative"><MagnifyingGlassIcon className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Ziyaretçi, sayfa ara..." className="w-full rounded-xl border bg-neutral-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-500" /></div>
+            <div className="mt-3 flex gap-1 overflow-x-auto pb-1">{([['all','Tümü'],['online','Online'],['unread','Yeni'],['open','Açık'],['pending','Beklemede']] as [Filter,string][]).map(([key,label]) => <button key={key} onClick={() => setFilter(key)} className={`whitespace-nowrap rounded-full px-3 py-1.5 text-[11px] font-semibold ${filter === key ? 'bg-blue-600 text-white' : 'bg-neutral-100 text-neutral-600'}`}>{label}{key === 'unread' && unreadCount ? ` ${unreadCount}` : ''}</button>)}</div>
+          </div>
+          <div className="max-h-[calc(100vh-10.5rem)] overflow-y-auto">
+            {filtered.map((visitor) => {
+              const conversation = conversationMap.get(visitor.conversationId);
+              const latest = latestByConversation.get(visitor.conversationId);
+              return <button key={visitor.id} onClick={() => void selectVisitor(visitor)} className={`w-full border-b p-4 text-left transition ${selected === visitor.id ? 'bg-blue-50' : 'hover:bg-neutral-50'}`}>
+                <div className="flex gap-3"><span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${visitor.online ? 'bg-green-500 shadow-[0_0_0_3px_rgba(34,197,94,.12)]' : 'bg-neutral-300'}`} /><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><p className="truncate text-sm font-semibold">{visitor.name}</p>{conversation?.unread ? <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">{conversation.unread}</span> : null}</div><p className="mt-0.5 truncate text-xs text-neutral-500">{visitor.pageTitle || visitor.pageUrl}</p><p className="mt-1 truncate text-[11px] text-neutral-400">{latest?.text || visitor.pageUrl}</p></div></div>
+                <div className="mt-2 flex items-center justify-between text-[10px] text-neutral-400"><span>{visitor.online ? 'Şimdi aktif' : `Son görülme ${new Date(visitor.lastSeenAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`}</span>{conversation?.customerTyping && <span className="font-semibold text-blue-600">yazıyor...</span>}</div>
+              </button>;
+            })}
+            {!filtered.length && <div className="p-8 text-center"><UserGroupIcon className="mx-auto h-10 w-10 text-neutral-300" /><p className="mt-3 text-sm font-medium">Ziyaretçi yok</p><p className="mt-1 text-xs text-neutral-400">Siteye yeni ziyaretçi geldiğinde burada görünecek.</p></div>}
+          </div>
+        </aside>
+
+        <section className={`${selected ? 'flex' : 'hidden md:flex'} min-h-[calc(100vh-4rem)] min-w-0 flex-col bg-white`}>
+          {current ? <>
+            <div className="flex items-center justify-between border-b px-4 py-3 md:px-5 md:py-4"><div className="flex min-w-0 items-center gap-2"><button onClick={() => setSelected('')} className="rounded-lg p-1 hover:bg-neutral-100 md:hidden"><ChevronLeftIcon className="h-5 w-5" /></button><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${current.online ? 'bg-green-500' : 'bg-neutral-300'}`} /><div className="min-w-0"><h2 className="truncate font-bold">{current.name}</h2><p className="truncate text-xs text-neutral-500">{current.online ? 'Online şimdi' : `Son görülme ${new Date(current.lastSeenAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`} · {current.pageTitle || current.pageUrl}</p></div></div><div className="flex items-center gap-2"><select value={currentConversation?.status ?? 'open'} onChange={(e) => void setStatus(e.target.value as Conversation['status'])} className="rounded-lg border px-2 py-2 text-xs"><option value="open">Açık</option><option value="pending">Beklemede</option><option value="closed">Kapalı</option></select><button onClick={() => setMobileDetails(!mobileDetails)} className="rounded-lg border p-2 xl:hidden" title="Ziyaretçi bilgileri"><ClockIcon className="h-4 w-4" /></button></div></div>
+            <div className="flex-1 overflow-y-auto bg-[#f8fafc] p-4 md:p-6">
+              <div className="mx-auto max-w-3xl space-y-4">
+                <div className="mx-auto flex w-fit items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[10px] text-neutral-400 shadow-sm"><ClockIcon className="h-3.5 w-3.5" /> Konuşma başladı {new Date(currentConversation?.updatedAt ?? Date.now()).toLocaleDateString('tr-TR')}</div>
+                {currentMessages.map((message) => <div key={message.id} className={`flex ${message.author === 'agent' ? 'justify-end' : 'justify-start'}`}><div className="max-w-[88%] md:max-w-[70%]"><div className={`rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${message.author === 'agent' ? 'rounded-br-md bg-blue-600 text-white' : 'rounded-bl-md border bg-white'}`}>{message.text}{message.attachmentUrl && <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className={`mt-2 block text-xs underline ${message.author === 'agent' ? 'text-blue-100' : 'text-blue-600'}`}>📎 {message.attachmentName || 'Dosyayı aç'}</a>}</div><p className="mt-1 px-1 text-[10px] text-neutral-400">{message.author === 'agent' ? 'Siz' : current.name} · {new Date(message.createdAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</p></div></div>)}
+                {currentConversation?.customerTyping && <div className="flex items-center gap-2 text-xs text-neutral-400"><span className="flex gap-1 rounded-full bg-white px-3 py-2 shadow-sm"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-400" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-400 [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-400 [animation-delay:240ms]" /></span> Müşteri yazıyor...</div>}
+              </div>
+            </div>
+            <div className="border-t bg-white p-3 md:p-4"><div className="mx-auto max-w-3xl">{file && <div className="mb-2 flex items-center justify-between rounded-lg bg-neutral-100 px-3 py-2 text-xs"><span className="truncate">📎 {file.name}</span><button onClick={() => setFile(null)}><XMarkIcon className="h-4 w-4" /></button></div>}<form onSubmit={send} className="flex items-end gap-2"><label className="cursor-pointer rounded-xl border p-3 hover:bg-neutral-50"><PaperClipIcon className="h-5 w-5" /><input type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label><textarea value={draft} onChange={(e) => updateDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} placeholder="Müşteriye cevap yaz..." rows={1} className="max-h-32 min-h-11 flex-1 resize-none rounded-xl border bg-neutral-50 px-4 py-3 text-sm outline-none focus:border-blue-500" /><button disabled={!draft.trim() && !file} className="rounded-xl bg-blue-600 p-3 text-white disabled:opacity-40"><PaperAirplaneIcon className="h-5 w-5" /></button></form><div className="mt-2 flex items-center justify-between text-[10px] text-neutral-400"><span>Enter gönder · Shift+Enter yeni satır</span>{currentConversation?.agentTyping && <span className="text-blue-600">Yazıyorsunuz...</span>}</div></div></div>
+          </> : <div className="flex flex-1 items-center justify-center p-8 text-center"><div><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-blue-600"><ChatBubbleLeftRightIcon className="h-8 w-8" /></div><h2 className="mt-4 text-lg font-bold">Bir ziyaretçi seçin</h2><p className="mt-1 max-w-sm text-sm text-neutral-400">Siteye giren ziyaretçileri soldaki listeden seçerek konuşmayı gerçek zamanlı yönetebilirsiniz.</p></div></div>}
+        </section>
+
+        <aside className={`${mobileDetails ? 'fixed inset-0 z-40 block' : 'hidden'} border-l bg-white p-5 xl:static xl:block`}>
+          {current && <><div className="flex items-center justify-between"><h3 className="font-bold">Ziyaretçi bilgileri</h3><button onClick={() => setMobileDetails(false)} className="rounded-lg p-2 xl:hidden"><XMarkIcon className="h-5 w-5" /></button></div><div className="mt-5 space-y-5 text-sm"><div><p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Durum</p><p className="mt-1 font-medium">{current.online ? '🟢 Online' : '⚪ Offline'}</p></div><div><p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Şu an baktığı sayfa</p><a className="mt-1 block break-all text-blue-600 hover:underline" href={current.pageUrl} target="_blank" rel="noreferrer">{current.pageTitle || current.pageUrl}</a><p className="mt-1 break-all text-[11px] text-neutral-400">{current.pageUrl}</p></div><div><p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Konuşma durumu</p><p className="mt-1 font-medium">{currentConversation?.status === 'open' ? 'Açık' : currentConversation?.status === 'pending' ? 'Beklemede' : 'Kapalı'}</p></div><div><p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">İlk görülme</p><p className="mt-1">{new Date(current.lastSeenAt).toLocaleString('tr-TR')}</p></div><div><p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Ziyaretçi ID</p><p className="mt-1 break-all font-mono text-[11px] text-neutral-500">{current.id}</p></div><div className="border-t pt-5"><a href={`https://wa.me/${process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP || ''}`} target="_blank" rel="noreferrer" className="block rounded-xl bg-green-600 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-green-700">WhatsApp'a yönlendir</a></div></div></>}
+        </aside>
+      </div>
+    </main>
+  );
+}
