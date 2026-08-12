@@ -28,9 +28,25 @@ function sign(value: string) {
   return createHmac('sha256', secret()).update(value).digest('hex');
 }
 
+function encodeEmail(email: string) {
+  return Buffer.from(email, 'utf8').toString('base64url');
+}
+
+function decodeEmail(value: string) {
+  try {
+    return Buffer.from(value, 'base64url').toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
 function validSession(value: string | undefined) {
   if (!value || !secret()) return false;
-  const [email, signature] = value.split('.');
+  const separator = value.lastIndexOf('.');
+  if (separator <= 0) return false;
+  const encodedEmail = value.slice(0, separator);
+  const signature = value.slice(separator + 1);
+  const email = decodeEmail(encodedEmail);
   if (!email || !signature) return false;
   const expected = sign(email);
   return expected.length === signature.length && timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
@@ -55,7 +71,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'E-posta veya şifre hatalı.' }, { status: 401 });
   }
 
-  const value = `${credentials.email}.${sign(credentials.email)}`;
+  const value = `${encodeEmail(credentials.email)}.${sign(credentials.email)}`;
   const response = NextResponse.json({ ok: true });
   response.cookies.set(cookieName, value, {
     httpOnly: true,
