@@ -17,6 +17,8 @@ function getVisitorId() {
 
 export function CustomerSupportWidget() {
   const pathname = usePathname();
+  if (pathname?.startsWith('/admin')) return null;
+
   const [isOpen, setIsOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
