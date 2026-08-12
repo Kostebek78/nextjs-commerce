@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { addMessage, getSupportSnapshot, markRead, setAgentOnline, setConversationStatus, setTyping, upsertVisitor } from 'lib/support';
-import { isAdminRequest } from '@/lib/support-auth';
+import { isAdminRequest } from '../../../lib/support-auth';
 
 export const runtime = 'nodejs';
 
@@ -78,32 +78,31 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  if (body.action === 'read') {
-    if (!body.conversationId) return NextResponse.json({ error: 'Konuşma eksik.' }, { status: 400 });
-    await markRead(body.conversationId);
+  if (body.action === 'status') {
+    if (!body.conversationId || !body.status) return NextResponse.json({ error: 'Konuşma durumu eksik.' }, { status: 400 });
+    await setConversationStatus(body.conversationId, body.status);
     return NextResponse.json({ ok: true });
   }
 
-  if (body.action === 'status') {
-    if (!body.conversationId || !body.status) return NextResponse.json({ error: 'Durum eksik.' }, { status: 400 });
-    return NextResponse.json({ conversation: await setConversationStatus(body.conversationId, body.status) });
+  if (body.action === 'read') {
+    if (!body.conversationId || !body.author) return NextResponse.json({ error: 'Konuşma ve kullanıcı tipi eksik.' }, { status: 400 });
+    await markRead(body.conversationId, body.author);
+    return NextResponse.json({ ok: true });
   }
 
-  const text = body.text?.trim();
-  if (!text || !body.conversationId || (body.author !== 'customer' && body.author !== 'agent')) {
-    return NextResponse.json({ error: 'Geçersiz mesaj.' }, { status: 400 });
-  }
-
+  if (!body.visitorId || !body.text?.trim()) return NextResponse.json({ error: 'Mesaj bilgisi eksik.' }, { status: 400 });
   if (body.author === 'agent' && !admin) return NextResponse.json({ error: 'Yetkili girişi gerekli.' }, { status: 401 });
 
-  return NextResponse.json({
-    message: await addMessage({
-      conversationId: body.conversationId,
-      author: body.author,
-      text,
-      attachmentUrl: body.attachmentUrl,
-      attachmentName: body.attachmentName,
-      attachmentType: body.attachmentType,
-    }),
-  }, { status: 201 });
+  const conversationId = body.conversationId ?? `conv_${body.visitorId}`;
+  const message = await addMessage({
+    conversationId,
+    visitorId: body.visitorId,
+    author: body.author ?? 'customer',
+    text: body.text.trim(),
+    attachmentUrl: body.attachmentUrl,
+    attachmentName: body.attachmentName,
+    attachmentType: body.attachmentType,
+  });
+
+  return NextResponse.json({ message });
 }
