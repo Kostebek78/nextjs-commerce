@@ -38,7 +38,9 @@ export function CustomerSupportWidget() {
 
   async function load() {
     if (!visitorId) return;
-    const data = await fetch(`/api/support?visitorId=${encodeURIComponent(visitorId)}`, { cache: 'no-store' }).then((response) => response.json());
+    const response = await fetch(`/api/support?visitorId=${encodeURIComponent(visitorId)}`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json();
     setMessages(data.messages ?? []); setAgentOnline(data.agentOnline !== false);
     const conversation = (data.conversations ?? []).find((item: ConversationState) => item.id === `conv_${visitorId}`);
     setAgentTyping(Boolean(conversation?.agentTyping));
@@ -53,16 +55,17 @@ export function CustomerSupportWidget() {
   useEffect(() => { transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' }); }, [messages, agentTyping]);
 
   async function send(event?: FormEvent, preset = draft) {
-    event?.preventDefault(); const text = preset.trim(); if (!text || !conversationId) return;
+    event?.preventDefault(); const text = preset.trim(); if (!text || !visitorId || !conversationId) return;
     let attachment: { attachmentUrl?: string; attachmentName?: string; attachmentType?: string } = {};
     if (file) { const form = new FormData(); form.append('file', file); const upload = await fetch('/api/support/upload', { method: 'POST', body: form }).then((response) => response.json()); if (upload.url) attachment = { attachmentUrl: upload.url, attachmentName: upload.name, attachmentType: upload.type }; }
-    await fetch('/api/support', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversationId, text, author: 'customer', ...attachment }) });
-    setDraft(''); setFile(null); setIsOpen(true); setHasNew(false);
+    const response = await fetch('/api/support', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visitorId, conversationId, text, author: 'customer', ...attachment }) });
+    if (!response.ok) return;
+    setDraft(''); setFile(null); setIsOpen(true); setHasNew(false); await load();
   }
 
   function updateDraft(value: string) {
     setDraft(value);
-    if (conversationId) void fetch('/api/support', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'typing', conversationId, author: 'customer', typing: Boolean(value.trim()) }) });
+    if (conversationId) void fetch('/api/support', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'typing', visitorId, conversationId, author: 'customer', typing: Boolean(value.trim()) }) });
   }
 
   return <section className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
