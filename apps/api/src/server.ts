@@ -3,8 +3,8 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
-import Fastify from 'fastify';
-import { createServer } from 'node:http';
+import Fastify, { type FastifyInstance } from 'fastify';
+import Redis from 'ioredis';
 import { Server } from 'socket.io';
 import bcrypt from 'bcryptjs';
 import { loadConfig } from '@temmuz/config';
@@ -18,17 +18,42 @@ import {
 } from '@temmuz/shared';
 
 const cfg = loadConfig();
-const httpServer = createServer();
-export const io = new Server(httpServer, {
-  cors: { origin: cfg.CORS_ORIGIN.split(','), credentials: true },
-});
+const PRESENCE_TIMEOUT_MS = 45_000;
+export let io: Server;
+let redis: Redis | undefined;
 
-const auth = async (req: any) => {
+function publicUser(user: { id: string; name: string; email: string; role: string }) {
+  return { id: user.id, name: user.name, email: user.email, role: user.role };
+}
+
+async function requireAuth(req: any) {
   await req.jwtVerify();
-};
+}
+async function requireAdmin(req: any) {
+  await req.jwtVerify();
+  if (req.user.role !== 'ADMIN')
+    throw Object.assign(new Error('Admin yetkisi gerekli'), { statusCode: 403, code: 'FORBIDDEN' });
+}
+
+async function markStaleVisitorsOffline() {
+  const cutoff = new Date(Date.now() - PRESENCE_TIMEOUT_MS);
+  const result = await prisma.visitor.updateMany({
+    where: { online: true, lastSeenAt: { lt: cutoff } },
+    data: { online: false },
+  });
+  if (result.count > 0) io?.emit('visitor:offline', { count: result.count });
+}
 
 async function sendAgent(conversationId: string, agentId: string, body: unknown) {
   const p = messageSchema.parse({ ...(body as object), conversationId });
+  const conversation = await prisma.conversation.findUniqueOrThrow({
+    where: { id: conversationId },
+  });
+  if (conversation.status === 'CLOSED')
+    throw Object.assign(new Error('Conversation closed'), {
+      statusCode: 409,
+      code: 'CONVERSATION_CLOSED',
+    });
   const message = await prisma.message.create({
     data: {
       conversationId,
@@ -38,16 +63,141 @@ async function sendAgent(conversationId: string, agentId: string, body: unknown)
       message: p.message,
       metadata: p.metadata,
       clientMessageId: p.clientMessageId,
+      deliveredAt: new Date(),
     },
   });
+  await prisma.conversation.update({
+    where: { id: conversationId },
+    data: { status: 'OPEN', assignedAgentId: agentId },
+  });
   io.to(conversationId).emit('message:new', message);
-  io.emit('message:new', message);
+  io.to(`visitor:${conversation.visitorId}`).emit('message:new', message);
+  io.to('agents').emit('message:new', message);
   return { success: true, message };
+}
+
+function registerRealtime(app: FastifyInstance) {
+  io = new Server(app.server, { cors: { origin: cfg.CORS_ORIGIN.split(','), credentials: true } });
+  io.on('connection', async (socket) => {
+    const { role, visitorId, siteId, token } = socket.handshake.auth as Record<
+      string,
+      string | undefined
+    >;
+    if (role === 'admin') {
+      try {
+        if (!token) throw new Error('Missing token');
+        app.jwt.verify(token);
+        socket.join('agents');
+        io.emit('agent:online', { id: socket.id });
+      } catch {
+        socket.disconnect(true);
+      }
+    }
+    if (role === 'customer' && visitorId) {
+      const visitor = await prisma.visitor.findUnique({
+        where: { siteId_visitorId: { siteId: siteId ?? cfg.WIDGET_SITE_ID, visitorId } },
+      });
+      if (visitor) {
+        socket.join(`visitor:${visitor.id}`);
+        await prisma.visitor.update({
+          where: { id: visitor.id },
+          data: { online: true, lastSeenAt: new Date() },
+        });
+        io.to('agents').emit('visitor:update', visitor);
+        const conversation = await prisma.conversation.findFirst({
+          where: { visitorId: visitor.id, status: { not: 'CLOSED' } },
+          orderBy: { updatedAt: 'desc' },
+        });
+        if (conversation) socket.join(conversation.id);
+      }
+    }
+    socket.on('customer:message', async (payload, ack) => {
+      try {
+        const p = messageSchema.parse(payload);
+        if (!visitorId) throw new Error('Visitor required');
+        const visitor = await prisma.visitor.findUniqueOrThrow({
+          where: { siteId_visitorId: { siteId: siteId ?? cfg.WIDGET_SITE_ID, visitorId } },
+        });
+        let conversation =
+          p.conversationId === 'new'
+            ? null
+            : await prisma.conversation.findUnique({ where: { id: p.conversationId } });
+        if (conversation && conversation.visitorId !== visitor.id)
+          throw Object.assign(new Error('Unauthorized conversation'), { statusCode: 403 });
+        if (!conversation || conversation.status === 'CLOSED') {
+          conversation = await prisma.conversation.create({
+            data: { visitorId: visitor.id, status: 'WAITING' },
+          });
+          io.to('agents').emit('conversation:created', conversation);
+        }
+        socket.join(conversation.id);
+        const msg = await prisma.message.create({
+          data: {
+            conversationId: conversation.id,
+            senderType: 'CUSTOMER',
+            senderId: visitor.visitorId,
+            message: p.message,
+            metadata: p.metadata,
+            clientMessageId: p.clientMessageId,
+            deliveredAt: new Date(),
+          },
+        });
+        await prisma.visitorEvent.create({
+          data: {
+            visitorId: visitor.id,
+            type: 'MESSAGE_SENT',
+            metadata: { conversationId: conversation.id },
+          },
+        });
+        io.to(conversation.id).emit('message:new', msg);
+        io.to('agents').emit('message:new', msg);
+        ack({ ok: true, id: msg.id, conversationId: conversation.id });
+      } catch (e) {
+        ack({ ok: false, error: e instanceof Error ? e.message : 'error' });
+      }
+    });
+    socket.on('agent:message', async (payload, ack) => {
+      try {
+        const msg = await sendAgent(payload.conversationId, socket.id, payload);
+        ack({ ok: true, id: msg.message.id });
+      } catch (e) {
+        ack({ ok: false, error: e instanceof Error ? e.message : 'error' });
+      }
+    });
+    socket.on('visitor:pageview', async (p) => {
+      try {
+        const b = pageViewSchema.parse(p);
+        const visitor = await prisma.visitor.update({
+          where: { siteId_visitorId: { siteId: b.siteId, visitorId: b.visitorId } },
+          data: {
+            currentUrl: b.currentUrl,
+            currentTitle: b.currentTitle,
+            pageType: b.pageType,
+            productId: b.product?.id,
+            productName: b.product?.name,
+            productUrl: b.product?.url,
+            category: b.product?.category,
+            lastSeenAt: new Date(),
+            online: true,
+          },
+        });
+        io.to('agents').emit('visitor:pageview', visitor);
+      } catch {}
+    });
+  });
 }
 
 export async function buildApp() {
   const app = Fastify({
-    logger: { redact: ['req.headers.authorization', 'password', 'token', 'message'] },
+    logger: {
+      redact: [
+        'req.headers.authorization',
+        'password',
+        'token',
+        'message',
+        'req.cookies.temmuz_session',
+      ],
+    },
     genReqId: () => crypto.randomUUID(),
   });
   await app.register(helmet);
@@ -58,6 +208,10 @@ export async function buildApp() {
     cookie: { cookieName: 'temmuz_session', signed: false },
   });
   await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
+  if (cfg.REDIS_URL) {
+    redis = new Redis(cfg.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1 });
+    redis.on('error', () => undefined);
+  }
   app.setErrorHandler((e, _req, reply) =>
     reply.status((e as any).statusCode ?? 500).send({
       success: false,
@@ -66,15 +220,24 @@ export async function buildApp() {
   );
   app.get('/health', async () => {
     let database = 'ok';
+    let redisStatus = cfg.REDIS_URL ? 'ok' : 'disabled';
     try {
       await prisma.$queryRaw`SELECT 1`;
     } catch {
       database = 'error';
     }
+    if (redis) {
+      try {
+        if (redis.status === 'wait') await redis.connect();
+        await redis.ping();
+      } catch {
+        redisStatus = 'error';
+      }
+    }
     return {
-      status: database === 'ok' ? 'ok' : 'degraded',
+      status: database === 'ok' && redisStatus !== 'error' ? 'ok' : 'degraded',
       database,
-      redis: cfg.REDIS_URL ? 'configured' : 'disabled',
+      redis: redisStatus,
     };
   });
   app.post(
@@ -102,21 +265,24 @@ export async function buildApp() {
         sameSite: 'lax',
         path: '/',
       });
-      return {
-        success: true,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role },
-      };
+      return { success: true, token, user: publicUser(user) };
     },
   );
   app.post('/auth/logout', async (_req, reply) => {
     reply.clearCookie('temmuz_session', { path: '/' });
     return { success: true };
   });
-  app.get('/auth/me', { preHandler: auth }, async (req: any) => ({
+  app.get('/auth/me', { preHandler: requireAuth }, async (req: any) => ({
     success: true,
     user: await prisma.adminUser.findUnique({
       where: { id: req.user.sub },
       select: { id: true, name: true, email: true, role: true },
+    }),
+  }));
+  app.get('/admin/users', { preHandler: requireAdmin }, async () => ({
+    success: true,
+    users: await prisma.adminUser.findMany({
+      select: { id: true, name: true, email: true, role: true, status: true },
     }),
   }));
   app.post('/widget/session', async (req) => {
@@ -124,7 +290,7 @@ export async function buildApp() {
     await prisma.site.upsert({
       where: { siteId: b.siteId },
       update: {},
-      create: { siteId: b.siteId, name: 'Temmuz Online' },
+      create: { siteId: b.siteId, name: 'Temmuz Online', whatsappNumber: cfg.WHATSAPP_NUMBER },
     });
     const visitor = await prisma.visitor.upsert({
       where: { siteId_visitorId: { siteId: b.siteId, visitorId: b.visitorId } },
@@ -164,7 +330,7 @@ export async function buildApp() {
         category: b.product?.category,
       },
     });
-    io.emit('visitor:update', visitor);
+    io?.to('agents').emit('visitor:update', visitor);
     return { success: true, visitorId: visitor.visitorId };
   });
   app.post('/widget/heartbeat', async (req) => {
@@ -178,7 +344,7 @@ export async function buildApp() {
         currentTitle: b.currentTitle,
       },
     });
-    io.emit('visitor:update', visitor);
+    io?.to('agents').emit('visitor:update', visitor);
     return { success: true };
   });
   app.post('/widget/pageview', async (req) => {
@@ -187,6 +353,7 @@ export async function buildApp() {
       where: { siteId_visitorId: { siteId: b.siteId, visitorId: b.visitorId } },
       data: {
         lastSeenAt: new Date(),
+        online: true,
         currentUrl: b.currentUrl,
         currentTitle: b.currentTitle,
         pageType: b.pageType,
@@ -205,17 +372,17 @@ export async function buildApp() {
         metadata: b.product ?? {},
       },
     });
-    io.emit('visitor:pageview', visitor);
+    io?.to('agents').emit('visitor:pageview', visitor);
     return { success: true };
   });
-  app.get('/visitors', { preHandler: auth }, async () => ({
+  app.get('/visitors', { preHandler: requireAuth }, async () => ({
     success: true,
     visitors: await prisma.visitor.findMany({
       orderBy: { lastSeenAt: 'desc' },
       include: { conversations: true },
     }),
   }));
-  app.get('/visitors/:id', { preHandler: auth }, async (req: any) => ({
+  app.get('/visitors/:id', { preHandler: requireAuth }, async (req: any) => ({
     success: true,
     visitor: await prisma.visitor.findUnique({
       where: { id: req.params.id },
@@ -225,14 +392,14 @@ export async function buildApp() {
       },
     }),
   }));
-  app.get('/conversations', { preHandler: auth }, async () => ({
+  app.get('/conversations', { preHandler: requireAuth }, async () => ({
     success: true,
     conversations: await prisma.conversation.findMany({
       orderBy: { updatedAt: 'desc' },
       include: { visitor: true, messages: { take: 1, orderBy: { createdAt: 'desc' } } },
     }),
   }));
-  app.get('/conversations/:id', { preHandler: auth }, async (req: any) => ({
+  app.get('/conversations/:id', { preHandler: requireAuth }, async (req: any) => ({
     success: true,
     conversation: await prisma.conversation.findUnique({
       where: { id: req.params.id },
@@ -242,32 +409,36 @@ export async function buildApp() {
       },
     }),
   }));
-  app.post('/conversations/:id/close', { preHandler: auth }, async (req: any) => {
+  app.post('/conversations/:id/close', { preHandler: requireAuth }, async (req: any) => {
     const c = await prisma.conversation.update({
       where: { id: req.params.id },
       data: { status: 'CLOSED', closedAt: new Date() },
     });
-    io.emit('conversation:updated', c);
+    await prisma.visitorEvent.create({
+      data: { visitorId: c.visitorId, type: 'CHAT_CLOSED', metadata: { conversationId: c.id } },
+    });
+    io.to(c.id).emit('conversation:closed', c);
+    io.to('agents').emit('conversation:updated', c);
     return { success: true, conversation: c };
   });
-  app.get('/conversations/:id/messages', { preHandler: auth }, async (req: any) => ({
+  app.get('/conversations/:id/messages', { preHandler: requireAuth }, async (req: any) => ({
     success: true,
     messages: await prisma.message.findMany({
       where: { conversationId: req.params.id },
       orderBy: { createdAt: 'asc' },
     }),
   }));
-  app.post('/conversations/:id/messages', { preHandler: auth }, async (req: any) =>
+  app.post('/conversations/:id/messages', { preHandler: requireAuth }, async (req: any) =>
     sendAgent(req.params.id, req.user.sub, req.body),
   );
-  app.get('/quick-replies', { preHandler: auth }, async () => ({
+  app.get('/quick-replies', { preHandler: requireAuth }, async () => ({
     success: true,
     quickReplies: await prisma.quickReply.findMany({
       where: { siteId: cfg.WIDGET_SITE_ID },
       orderBy: { createdAt: 'desc' },
     }),
   }));
-  app.post('/quick-replies', { preHandler: auth }, async (req: any) => ({
+  app.post('/quick-replies', { preHandler: requireAuth }, async (req: any) => ({
     success: true,
     quickReply: await prisma.quickReply.create({
       data: {
@@ -277,95 +448,23 @@ export async function buildApp() {
       },
     }),
   }));
-  app.put('/quick-replies/:id', { preHandler: auth }, async (req: any) => ({
+  app.put('/quick-replies/:id', { preHandler: requireAuth }, async (req: any) => ({
     success: true,
     quickReply: await prisma.quickReply.update({
       where: { id: req.params.id },
       data: quickReplySchema.partial().parse(req.body),
     }),
   }));
-  app.delete('/quick-replies/:id', { preHandler: auth }, async (req: any) => ({
+  app.delete('/quick-replies/:id', { preHandler: requireAuth }, async (req: any) => ({
     success: true,
     quickReply: await prisma.quickReply.delete({ where: { id: req.params.id } }),
   }));
+  registerRealtime(app);
+  setInterval(markStaleVisitorsOffline, 30_000).unref();
   return app;
 }
 
-io.on('connection', async (socket) => {
-  const { role, visitorId, siteId } = socket.handshake.auth as Record<string, string>;
-  if (role === 'admin') {
-    socket.join('agents');
-    io.emit('agent:online', { id: socket.id });
-  }
-  if (role === 'customer' && visitorId) {
-    const visitor = await prisma.visitor.findUnique({
-      where: { siteId_visitorId: { siteId: siteId ?? cfg.WIDGET_SITE_ID, visitorId } },
-    });
-    if (visitor) {
-      socket.join(`visitor:${visitor.id}`);
-      const c = await prisma.conversation.findFirst({
-        where: { visitorId: visitor.id, status: { not: 'CLOSED' } },
-        orderBy: { updatedAt: 'desc' },
-      });
-      if (c) socket.join(c.id);
-    }
-  }
-  socket.on('customer:message', async (payload, ack) => {
-    try {
-      const p = messageSchema.parse(payload);
-      let c = await prisma.conversation.findUnique({ where: { id: p.conversationId } });
-      if (!c && visitorId) {
-        const v = await prisma.visitor.findUniqueOrThrow({
-          where: { siteId_visitorId: { siteId: siteId ?? cfg.WIDGET_SITE_ID, visitorId } },
-        });
-        c = await prisma.conversation.create({ data: { visitorId: v.id, status: 'WAITING' } });
-        io.emit('conversation:created', c);
-      }
-      if (!c) throw new Error('Conversation not found');
-      socket.join(c.id);
-      const msg = await prisma.message.create({
-        data: {
-          conversationId: c.id,
-          senderType: 'CUSTOMER',
-          senderId: visitorId ?? 'customer',
-          message: p.message,
-          metadata: p.metadata,
-          clientMessageId: p.clientMessageId,
-        },
-      });
-      await prisma.visitorEvent.create({
-        data: { visitorId: c.visitorId, type: 'MESSAGE_SENT', metadata: { conversationId: c.id } },
-      });
-      io.to(c.id).emit('message:new', msg);
-      io.to('agents').emit('message:new', msg);
-      ack({ ok: true, id: msg.id });
-    } catch (e) {
-      ack({ ok: false, error: e instanceof Error ? e.message : 'error' });
-    }
-  });
-  socket.on('agent:message', async (payload, ack) => {
-    try {
-      const msg = await sendAgent(payload.conversationId, socket.id, payload);
-      ack({ ok: true, id: msg.message.id });
-    } catch (e) {
-      ack({ ok: false, error: e instanceof Error ? e.message : 'error' });
-    }
-  });
-  socket.on('visitor:pageview', async (p) => {
-    try {
-      pageViewSchema.parse(p);
-      await prisma.visitor.update({
-        where: { siteId_visitorId: { siteId: p.siteId, visitorId: p.visitorId } },
-        data: { currentUrl: p.currentUrl, currentTitle: p.currentTitle, lastSeenAt: new Date() },
-      });
-      io.emit('visitor:pageview', p);
-    } catch {}
-  });
-});
-
 if (import.meta.url === `file://${process.argv[1]}`) {
   const app = await buildApp();
-  await app.ready();
-  httpServer.on('request', app.server.emit.bind(app.server, 'request'));
-  httpServer.listen({ port: cfg.PORT, host: '0.0.0.0' });
+  await app.listen({ port: cfg.PORT, host: '0.0.0.0' });
 }

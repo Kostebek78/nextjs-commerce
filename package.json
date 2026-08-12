@@ -11,7 +11,8 @@
     "prettier:check": "prettier --check --ignore-unknown .",
     "db:generate": "pnpm --filter @temmuz/database prisma:generate",
     "db:migrate": "pnpm --filter @temmuz/database prisma:migrate",
-    "db:seed": "pnpm --filter @temmuz/database seed"
+    "db:seed": "pnpm --filter @temmuz/database seed",
+    "e2e": "playwright test"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",

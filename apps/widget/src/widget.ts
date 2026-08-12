@@ -3,6 +3,7 @@ const script = document.currentScript as HTMLScriptElement | null;
 const siteId = script?.dataset.siteId ?? 'temmuz-online';
 const apiUrl = script?.dataset.apiUrl ?? 'https://api.support.temmuzonline.com';
 const visitorKey = 'temmuz_support_visitor_id';
+const whatsappNumber = script?.dataset.whatsappNumber ?? '905000000000';
 const sessionId = `session_${crypto.randomUUID()}`;
 const visitorId =
   localStorage.getItem(visitorKey) ??
@@ -163,7 +164,7 @@ wa.addEventListener('click', () => {
   const text = p?.name
     ? `Merhaba, ${p.name} ürünü hakkında bilgi almak istiyorum.`
     : 'Merhaba, Temmuz Online hakkında bilgi almak istiyorum.';
-  open(`https://wa.me/905000000000?text=${encodeURIComponent(text)}`, '_blank');
+  open(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(text)}`, '_blank');
 });
 post('/widget/session', page());
 connect();

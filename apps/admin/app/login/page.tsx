@@ -7,10 +7,11 @@ export default function Login() {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     try {
-      await api('/auth/login', {
+      const res = await api('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email: f.get('email'), password: f.get('password') }),
       });
+      window.localStorage.setItem('temmuz_admin_token', res.token);
       location.href = '/dashboard';
     } catch {
       setError('Giriş başarısız');

@@ -1,26 +1,22 @@
-import { API } from '../../src/api';
-async function getData() {
-  const [v, c] = await Promise.all([
-    fetch(`${API}/visitors`, { cache: 'no-store', credentials: 'include' })
-      .then((r) => r.json())
-      .catch(() => ({ visitors: [] })),
-    fetch(`${API}/conversations`, { cache: 'no-store', credentials: 'include' })
-      .then((r) => r.json())
-      .catch(() => ({ conversations: [] })),
-  ]);
-  return { visitors: v.visitors ?? [], conversations: c.conversations ?? [] };
-}
-export default async function Dashboard() {
-  const d = await getData();
+'use client';
+import { useEffect, useState } from 'react';
+import { api } from '../../src/api';
+
+export default function Dashboard() {
+  const [visitors, setVisitors] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<any[]>([]);
+  useEffect(() => {
+    Promise.all([api('/visitors'), api('/conversations')]).then(([v, c]) => {
+      setVisitors(v.visitors ?? []);
+      setConversations(c.conversations ?? []);
+    });
+  }, []);
   const today = new Date().toDateString();
   const stats = [
-    ['ONLINE VISITORS', d.visitors.filter((v: any) => v.online).length],
-    ['OPEN CHATS', d.conversations.filter((c: any) => c.status === 'OPEN').length],
-    ['WAITING', d.conversations.filter((c: any) => c.status === 'WAITING').length],
-    [
-      'TODAY',
-      d.conversations.filter((c: any) => new Date(c.startedAt).toDateString() === today).length,
-    ],
+    ['ONLINE VISITORS', visitors.filter((v) => v.online).length],
+    ['OPEN CHATS', conversations.filter((c) => c.status === 'OPEN').length],
+    ['WAITING', conversations.filter((c) => c.status === 'WAITING').length],
+    ['TODAY', conversations.filter((c) => new Date(c.startedAt).toDateString() === today).length],
   ];
   return (
     <>

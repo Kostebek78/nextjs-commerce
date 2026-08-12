@@ -28,6 +28,7 @@ services:
       WIDGET_SITE_ID: temmuz-online
       WHATSAPP_NUMBER: '905000000000'
       PORT: 4000
+      SEED_DEMO_DATA: 'false'
     depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_started } }
     ports: ['4000:4000']
   admin:
