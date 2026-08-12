@@ -4,10 +4,16 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const API = process.env.E2E_API_URL ?? 'http://localhost:4000';
 const ADMIN = process.env.E2E_ADMIN_URL ?? 'http://localhost:3000';
-const WIDGET = process.env.E2E_WIDGET_URL ?? 'http://localhost:5173/src/widget.ts';
+const WIDGET = process.env.E2E_WIDGET_URL ?? 'http://localhost:5173/widget.js';
 
 test.afterAll(async () => {
   await prisma.$disconnect();
+});
+
+test('real built widget asset is served', async ({ request }) => {
+  const response = await request.get(WIDGET);
+  expect(response.ok()).toBeTruthy();
+  expect(response.headers()['content-type']).toMatch(/javascript|ecmascript|text\/plain/);
 });
 
 test('real customer widget to admin live chat flow persists messages and page tracking', async ({
@@ -37,10 +43,7 @@ test('real customer widget to admin live chat flow persists messages and page tr
   await admin.getByRole('button', { name: /giriş yap/i }).click();
   await expect(admin).toHaveURL(/dashboard/);
 
-  await customer.setContent(
-    `<!doctype html><html><head><title>Ahmad Tea Yasemin Aromalı Yeşil Çay</title><meta property="og:type" content="product"><meta property="og:title" content="Ahmad Tea Yasemin Aromalı Yeşil Çay"><script type="application/ld+json">{"@context":"https://schema.org","@type":"Product","sku":"test-urun","name":"Ahmad Tea Yasemin Aromalı Yeşil Çay","category":"Çay"}</script></head><body><h1>Ahmad Tea Yasemin Aromalı Yeşil Çay</h1><script src="${WIDGET}" data-site-id="temmuz-online" data-api-url="${API}" data-whatsapp-number="905000000000"></script></body></html>`,
-    { waitUntil: 'domcontentloaded' },
-  );
+  await customer.goto('http://localhost:5173/demo.html');
   await expect
     .poll(() => customer.evaluate(() => localStorage.getItem('temmuz_support_visitor_id')))
     .toContain('visitor_');

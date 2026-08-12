@@ -22,6 +22,45 @@ const PRESENCE_TIMEOUT_MS = 45_000;
 export let io: Server;
 let redis: Redis | undefined;
 
+type AdminSocketUser = { sub: string; role: 'ADMIN' | 'AGENT'; email: string };
+type CustomerSocketUser = {
+  siteId: string;
+  visitorId: string;
+  sessionId: string;
+  kind: 'customer';
+};
+
+function assertAllowedSite(siteId: string) {
+  if (siteId !== cfg.WIDGET_SITE_ID) {
+    throw Object.assign(new Error('Invalid site ID'), { statusCode: 403, code: 'INVALID_SITE' });
+  }
+}
+
+function signWidgetToken(app: FastifyInstance, payload: CustomerSocketUser) {
+  return app.jwt.sign(payload, { expiresIn: '12h' });
+}
+
+function verifyCustomerSocketToken(
+  app: FastifyInstance,
+  token: string | undefined,
+  siteId: string | undefined,
+  visitorId: string | undefined,
+  sessionId: string | undefined,
+) {
+  if (!token) throw new Error('Missing customer token');
+  const decoded = app.jwt.verify<CustomerSocketUser>(token);
+  if (
+    decoded.kind !== 'customer' ||
+    decoded.siteId !== siteId ||
+    decoded.visitorId !== visitorId ||
+    decoded.sessionId !== sessionId
+  ) {
+    throw new Error('Invalid customer token');
+  }
+  assertAllowedSite(decoded.siteId);
+  return decoded;
+}
+
 function publicUser(user: { id: string; name: string; email: string; role: string }) {
   return { id: user.id, name: user.name, email: user.email, role: user.role };
 }
@@ -46,6 +85,12 @@ async function markStaleVisitorsOffline() {
 
 async function sendAgent(conversationId: string, agentId: string, body: unknown) {
   const p = messageSchema.parse({ ...(body as object), conversationId });
+  const agent = await prisma.adminUser.findUnique({ where: { id: agentId } });
+  if (!agent || agent.status !== 'ACTIVE')
+    throw Object.assign(new Error('Agent authorization failed'), {
+      statusCode: 403,
+      code: 'FORBIDDEN',
+    });
   const conversation = await prisma.conversation.findUniqueOrThrow({
     where: { id: conversationId },
   });
@@ -54,39 +99,55 @@ async function sendAgent(conversationId: string, agentId: string, body: unknown)
       statusCode: 409,
       code: 'CONVERSATION_CLOSED',
     });
-  const message = await prisma.message.create({
-    data: {
-      conversationId,
-      senderType: 'AGENT',
-      senderId: agentId,
-      agentId,
-      message: p.message,
-      metadata: p.metadata,
-      clientMessageId: p.clientMessageId,
-      deliveredAt: new Date(),
-    },
-  });
+  let duplicate = false;
+  let message;
+  try {
+    message = await prisma.message.create({
+      data: {
+        conversationId,
+        senderType: 'AGENT',
+        senderId: agentId,
+        agentId,
+        message: p.message,
+        metadata: p.metadata,
+        clientMessageId: p.clientMessageId,
+        deliveredAt: new Date(),
+      },
+    });
+  } catch (error) {
+    if ((error as { code?: string }).code !== 'P2002' || !p.clientMessageId) throw error;
+    duplicate = true;
+    message = await prisma.message.findUniqueOrThrow({
+      where: {
+        conversationId_clientMessageId: { conversationId, clientMessageId: p.clientMessageId },
+      },
+    });
+  }
   await prisma.conversation.update({
     where: { id: conversationId },
     data: { status: 'OPEN', assignedAgentId: agentId },
   });
-  io.to(conversationId).emit('message:new', message);
-  io.to(`visitor:${conversation.visitorId}`).emit('message:new', message);
-  io.to('agents').emit('message:new', message);
-  return { success: true, message };
+  if (!duplicate) {
+    io.to(conversationId).emit('message:new', message);
+    io.to(`visitor:${conversation.visitorId}`).emit('message:new', message);
+    io.to('agents').emit('message:new', message);
+  }
+  return { success: true, message, duplicate };
 }
 
 function registerRealtime(app: FastifyInstance) {
   io = new Server(app.server, { cors: { origin: cfg.CORS_ORIGIN.split(','), credentials: true } });
   io.on('connection', async (socket) => {
-    const { role, visitorId, siteId, token } = socket.handshake.auth as Record<
+    const { role, visitorId, siteId, sessionId, token } = socket.handshake.auth as Record<
       string,
       string | undefined
     >;
     if (role === 'admin') {
       try {
         if (!token) throw new Error('Missing token');
-        app.jwt.verify(token);
+        const user = app.jwt.verify<AdminSocketUser>(token);
+        if (!['ADMIN', 'AGENT'].includes(user.role)) throw new Error('Invalid role');
+        socket.data.user = user;
         socket.join('agents');
         io.emit('agent:online', { id: socket.id });
       } catch {
@@ -94,8 +155,16 @@ function registerRealtime(app: FastifyInstance) {
       }
     }
     if (role === 'customer' && visitorId) {
+      let customer: CustomerSocketUser;
+      try {
+        customer = verifyCustomerSocketToken(app, token, siteId, visitorId, sessionId);
+      } catch {
+        socket.disconnect(true);
+        return;
+      }
+      socket.data.customer = customer;
       const visitor = await prisma.visitor.findUnique({
-        where: { siteId_visitorId: { siteId: siteId ?? cfg.WIDGET_SITE_ID, visitorId } },
+        where: { siteId_visitorId: { siteId: customer.siteId, visitorId: customer.visitorId } },
       });
       if (visitor) {
         socket.join(`visitor:${visitor.id}`);
@@ -114,9 +183,10 @@ function registerRealtime(app: FastifyInstance) {
     socket.on('customer:message', async (payload, ack) => {
       try {
         const p = messageSchema.parse(payload);
-        if (!visitorId) throw new Error('Visitor required');
+        const customer = socket.data.customer as CustomerSocketUser | undefined;
+        if (!customer) throw new Error('Authenticated visitor required');
         const visitor = await prisma.visitor.findUniqueOrThrow({
-          where: { siteId_visitorId: { siteId: siteId ?? cfg.WIDGET_SITE_ID, visitorId } },
+          where: { siteId_visitorId: { siteId: customer.siteId, visitorId: customer.visitorId } },
         });
         let conversation =
           p.conversationId === 'new'
@@ -131,34 +201,53 @@ function registerRealtime(app: FastifyInstance) {
           io.to('agents').emit('conversation:created', conversation);
         }
         socket.join(conversation.id);
-        const msg = await prisma.message.create({
-          data: {
-            conversationId: conversation.id,
-            senderType: 'CUSTOMER',
-            senderId: visitor.visitorId,
-            message: p.message,
-            metadata: p.metadata,
-            clientMessageId: p.clientMessageId,
-            deliveredAt: new Date(),
-          },
-        });
-        await prisma.visitorEvent.create({
-          data: {
-            visitorId: visitor.id,
-            type: 'MESSAGE_SENT',
-            metadata: { conversationId: conversation.id },
-          },
-        });
-        io.to(conversation.id).emit('message:new', msg);
-        io.to('agents').emit('message:new', msg);
-        ack({ ok: true, id: msg.id, conversationId: conversation.id });
+        let duplicate = false;
+        let msg;
+        try {
+          msg = await prisma.message.create({
+            data: {
+              conversationId: conversation.id,
+              senderType: 'CUSTOMER',
+              senderId: visitor.visitorId,
+              message: p.message,
+              metadata: p.metadata,
+              clientMessageId: p.clientMessageId,
+              deliveredAt: new Date(),
+            },
+          });
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'P2002' || !p.clientMessageId) throw error;
+          duplicate = true;
+          msg = await prisma.message.findUniqueOrThrow({
+            where: {
+              conversationId_clientMessageId: {
+                conversationId: conversation.id,
+                clientMessageId: p.clientMessageId,
+              },
+            },
+          });
+        }
+        if (!duplicate) {
+          await prisma.visitorEvent.create({
+            data: {
+              visitorId: visitor.id,
+              type: 'MESSAGE_SENT',
+              metadata: { conversationId: conversation.id },
+            },
+          });
+          io.to(conversation.id).emit('message:new', msg);
+          io.to('agents').emit('message:new', msg);
+        }
+        ack({ ok: true, id: msg.id, conversationId: conversation.id, duplicate });
       } catch (e) {
         ack({ ok: false, error: e instanceof Error ? e.message : 'error' });
       }
     });
     socket.on('agent:message', async (payload, ack) => {
       try {
-        const msg = await sendAgent(payload.conversationId, socket.id, payload);
+        const user = socket.data.user as AdminSocketUser | undefined;
+        if (!user) throw new Error('Authenticated agent required');
+        const msg = await sendAgent(payload.conversationId, user.sub, payload);
         ack({ ok: true, id: msg.message.id });
       } catch (e) {
         ack({ ok: false, error: e instanceof Error ? e.message : 'error' });
@@ -167,6 +256,9 @@ function registerRealtime(app: FastifyInstance) {
     socket.on('visitor:pageview', async (p) => {
       try {
         const b = pageViewSchema.parse(p);
+        const customer = socket.data.customer as CustomerSocketUser | undefined;
+        if (!customer || customer.siteId !== b.siteId || customer.visitorId !== b.visitorId)
+          throw new Error('Unauthorized pageview');
         const visitor = await prisma.visitor.update({
           where: { siteId_visitorId: { siteId: b.siteId, visitorId: b.visitorId } },
           data: {
@@ -287,6 +379,7 @@ export async function buildApp() {
   }));
   app.post('/widget/session', async (req) => {
     const b = visitorSessionSchema.parse(req.body);
+    assertAllowedSite(b.siteId);
     await prisma.site.upsert({
       where: { siteId: b.siteId },
       update: {},
@@ -330,11 +423,28 @@ export async function buildApp() {
         category: b.product?.category,
       },
     });
+    const activeConversation = await prisma.conversation.findFirst({
+      where: { visitorId: visitor.id, status: { not: 'CLOSED' } },
+      orderBy: { updatedAt: 'desc' },
+      include: { messages: { orderBy: { createdAt: 'asc' }, take: 50 } },
+    });
     io?.to('agents').emit('visitor:update', visitor);
-    return { success: true, visitorId: visitor.visitorId };
+    return {
+      success: true,
+      visitorId: visitor.visitorId,
+      activeConversationId: activeConversation?.id ?? null,
+      messages: activeConversation?.messages ?? [],
+      socketToken: signWidgetToken(app, {
+        kind: 'customer',
+        siteId: b.siteId,
+        visitorId: b.visitorId,
+        sessionId: b.sessionId,
+      }),
+    };
   });
   app.post('/widget/heartbeat', async (req) => {
     const b = pageViewSchema.parse(req.body);
+    assertAllowedSite(b.siteId);
     const visitor = await prisma.visitor.update({
       where: { siteId_visitorId: { siteId: b.siteId, visitorId: b.visitorId } },
       data: {
@@ -349,6 +459,7 @@ export async function buildApp() {
   });
   app.post('/widget/pageview', async (req) => {
     const b = pageViewSchema.parse(req.body);
+    assertAllowedSite(b.siteId);
     const visitor = await prisma.visitor.update({
       where: { siteId_visitorId: { siteId: b.siteId, visitorId: b.visitorId } },
       data: {

@@ -71,12 +71,14 @@ const page = () => ({
   product: product(),
 });
 async function post(path: string, body: unknown) {
-  await fetch(`${apiUrl}${path}`, {
+  const response = await fetch(`${apiUrl}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
     credentials: 'omit',
-  }).catch(() => {});
+  }).catch(() => undefined);
+  if (!response?.ok) return undefined;
+  return response.json().catch(() => undefined);
 }
 const root = document.createElement('div');
 root.id = 'temmuz-support-root';
@@ -92,10 +94,14 @@ const wrap = shadow.querySelector('.wrap')!,
   sendBtn = shadow.querySelector('.send')!,
   wa = shadow.querySelector('.wa')!;
 let socket: Socket;
+let socketToken = '';
 let conversationId = 'new';
-function add(text: string, me = false) {
+let historyLoaded = false;
+function add(text: string, me = false, id?: string) {
+  if (id && msgs.querySelector(`[data-message-id="${id}"]`)) return;
   const d = document.createElement('div');
   d.className = `msg ${me ? 'me' : 'them'}`;
+  if (id) d.setAttribute('data-message-id', id);
   const s = document.createElement('span');
   s.textContent = text;
   d.appendChild(s);
@@ -105,7 +111,7 @@ function add(text: string, me = false) {
 function connect() {
   socket = io(apiUrl, {
     transports: ['websocket', 'polling'],
-    auth: { role: 'customer', visitorId, siteId },
+    auth: { role: 'customer', visitorId, siteId, sessionId, token: socketToken },
     reconnection: true,
   });
   socket.on(
@@ -116,7 +122,7 @@ function connect() {
   socket.on('message:new', (m: any) => {
     if (m.senderType === 'AGENT') {
       conversationId = m.conversationId;
-      add(m.message, false);
+      add(m.message, false, m.id);
     }
   });
   socket.on('conversation:created', (c: any) => {
@@ -137,6 +143,7 @@ async function send() {
       metadata: { url: location.href, product: product() },
     },
     (ack: any) => {
+      if (ack.ok && ack.conversationId) conversationId = ack.conversationId;
       if (!ack.ok) add('Mesaj gönderilemedi, lütfen tekrar deneyin.', false);
     },
   );
@@ -147,7 +154,8 @@ btn.addEventListener(
   () => {
     wrap.classList.add('open');
     post('/widget/pageview', page());
-    add('Merhaba, Temmuz Online destek ekibine hoş geldiniz. Size nasıl yardımcı olabiliriz?');
+    if (!historyLoaded && msgs.childElementCount === 0)
+      add('Merhaba, Temmuz Online destek ekibine hoş geldiniz. Size nasıl yardımcı olabiliriz?');
   },
   { once: false },
 );
@@ -166,8 +174,16 @@ wa.addEventListener('click', () => {
     : 'Merhaba, Temmuz Online hakkında bilgi almak istiyorum.';
   open(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(text)}`, '_blank');
 });
-post('/widget/session', page());
-connect();
+post('/widget/session', page()).then((session) => {
+  socketToken = session?.socketToken ?? '';
+  conversationId = session?.activeConversationId ?? 'new';
+  if (Array.isArray(session?.messages)) {
+    historyLoaded = session.messages.length > 0;
+    for (const message of session.messages)
+      add(message.message, message.senderType === 'CUSTOMER', message.id);
+  }
+  connect();
+});
 setInterval(() => post('/widget/heartbeat', page()), 25000);
 let last = location.href;
 setInterval(() => {
