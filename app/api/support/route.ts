@@ -85,8 +85,8 @@ export async function POST(request: Request) {
   }
 
   if (body.action === 'read') {
-    if (!body.conversationId || !body.author) return NextResponse.json({ error: 'Konuşma ve kullanıcı tipi eksik.' }, { status: 400 });
-    await markRead(body.conversationId, body.author);
+    if (!body.conversationId) return NextResponse.json({ error: 'Konuşma eksik.' }, { status: 400 });
+    await markRead(body.conversationId, body.author ?? (admin ? 'agent' : 'customer'));
     return NextResponse.json({ ok: true });
   }
 
