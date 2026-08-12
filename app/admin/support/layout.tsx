@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { isAdminRequest } from '@/lib/support-auth';
+import { isAdminRequest } from '../../../lib/support-auth';
 
 export const dynamic = 'force-dynamic';
 
