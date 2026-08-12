@@ -64,6 +64,37 @@ const domain = process.env.SHOPIFY_STORE_DOMAIN
 const endpoint = `${domain}${SHOPIFY_GRAPHQL_API_ENDPOINT}`;
 const key = process.env.SHOPIFY_STOREFRONT_ACCESS_TOKEN!;
 
+const shouldUseShopifyBuildMock =
+  process.env.SHOPIFY_STORE_DOMAIN === 'ci.myshopify.com' && key === 'ci';
+
+function getShopifyBuildMock<T>(query: string): { status: number; body: T } {
+  const emptyConnection = { edges: [] };
+  const data = query.includes('getMenu')
+    ? { menu: { items: [] } }
+    : query.includes('getCollectionProducts')
+      ? { collection: { products: emptyConnection } }
+      : query.includes('getCollections')
+        ? { collections: emptyConnection }
+        : query.includes('getCollection')
+          ? { collection: null }
+          : query.includes('getPages')
+            ? { pages: emptyConnection }
+            : query.includes('getPage')
+              ? { pageByHandle: null }
+              : query.includes('getProductRecommendations')
+                ? { productRecommendations: [] }
+                : query.includes('getProducts')
+                  ? { products: emptyConnection }
+                  : query.includes('getProduct')
+                    ? { product: null }
+                    : { cart: null };
+
+  return {
+    status: 200,
+    body: { data } as T
+  };
+}
+
 type ExtractVariables<T> = T extends { variables: object }
   ? T['variables']
   : never;
@@ -77,6 +108,10 @@ export async function shopifyFetch<T>({
   query: string;
   variables?: ExtractVariables<T>;
 }): Promise<{ status: number; body: T } | never> {
+  if (shouldUseShopifyBuildMock) {
+    return getShopifyBuildMock<T>(query);
+  }
+
   try {
     const result = await fetch(endpoint, {
       method: 'POST',
