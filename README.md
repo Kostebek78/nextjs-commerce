@@ -1,75 +1,147 @@
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fcommerce&project-name=commerce&repo-name=commerce&demo-title=Next.js%20Commerce&demo-url=https%3A%2F%2Fdemo.vercel.store&demo-image=https%3A%2F%2Fbigcommerce-demo-asset-ksvtgfvnd.vercel.app%2Fbigcommerce.png&env=COMPANY_NAME,SHOPIFY_REVALIDATION_SECRET,SHOPIFY_STORE_DOMAIN,SHOPIFY_STOREFRONT_ACCESS_TOKEN,SITE_NAME)
+# Temmuz Online Self-Hosted Live Support
 
-# Next.js Commerce
+Temmuz Online için JivoChat/Tawk/Crisp gibi üçüncü taraf SaaS kullanmadan çalışan, tek JavaScript snippet ile İkas veya herhangi bir web sitesine eklenebilen canlı destek monorepo'su.
 
-A high-performance, server-rendered Next.js App Router ecommerce application.
+## Architecture
 
-This template uses React Server Components, Server Actions, `Suspense`, `useOptimistic`, and more.
+- `apps/api`: Fastify REST API, Socket.IO realtime server, auth, rate limit, health check.
+- `apps/admin`: Next.js admin paneli (`/login`, `/dashboard`, `/conversations`, `/visitors`, `/settings`, `/quick-replies`).
+- `apps/widget`: Framework bağımsız Vanilla TypeScript widget; Shadow DOM ile CSS izolasyonu.
+- `packages/database`: Prisma schema, migration ve seed.
+- `packages/shared`: Zod validation, ortak event ve type sözleşmeleri.
+- `packages/config`: environment validation.
+- `infra/nginx`: `support.temmuzonline.com` ve `api.support.temmuzonline.com` reverse proxy.
 
-<h3 id="v1-note"></h3>
+Mesaj akışı: Customer widget -> Socket.IO API -> PostgreSQL persistence -> admin room -> temsilci cevabı -> müşteri socket room.
 
-> Note: Looking for Next.js Commerce v1? View the [code](https://github.com/vercel/commerce/tree/v1), [demo](https://commerce-v1.vercel.store), and [release notes](https://github.com/vercel/commerce/releases/tag/v1).
+## Requirements
 
-## Providers
+- Node.js 22+
+- pnpm 10+
+- Docker / Docker Compose
+- PostgreSQL 16
+- Redis 7 (production presence/rate limit altyapısı için compose içinde hazır)
 
-Vercel will only be actively maintaining a Shopify version [as outlined in our vision and strategy for Next.js Commerce](https://github.com/vercel/commerce/pull/966).
-
-Vercel is happy to partner and work with any commerce provider to help them get a similar template up and running and listed below. Alternative providers should be able to fork this repository and swap out the `lib/shopify` file with their own implementation while leaving the rest of the template mostly unchanged.
-
-- Shopify (this repository)
-- [BigCommerce](https://github.com/bigcommerce/nextjs-commerce) ([Demo](https://next-commerce-v2.vercel.app/))
-- [Ecwid by Lightspeed](https://github.com/Ecwid/ecwid-nextjs-commerce/) ([Demo](https://ecwid-nextjs-commerce.vercel.app/))
-- [Geins](https://github.com/geins-io/vercel-nextjs-commerce) ([Demo](https://geins-nextjs-commerce-starter.vercel.app/))
-- [Medusa](https://github.com/medusajs/vercel-commerce) ([Demo](https://medusa-nextjs-commerce.vercel.app/))
-- [Prodigy Commerce](https://github.com/prodigycommerce/nextjs-commerce) ([Demo](https://prodigy-nextjs-commerce.vercel.app/))
-- [Saleor](https://github.com/saleor/nextjs-commerce) ([Demo](https://saleor-commerce.vercel.app/))
-- [Shopware](https://github.com/shopwareLabs/vercel-commerce) ([Demo](https://shopware-vercel-commerce-react.vercel.app/))
-- [Swell](https://github.com/swellstores/verswell-commerce) ([Demo](https://verswell-commerce.vercel.app/))
-- [Umbraco](https://github.com/umbraco/Umbraco.VercelCommerce.Demo) ([Demo](https://vercel-commerce-demo.umbraco.com/))
-- [Wix](https://github.com/wix/headless-templates/tree/main/nextjs/commerce) ([Demo](https://wix-nextjs-commerce.vercel.app/))
-- [Fourthwall](https://github.com/FourthwallHQ/vercel-commerce) ([Demo](https://vercel-storefront.fourthwall.app/))
-
-> Note: Providers, if you are looking to use similar products for your demo, you can [download these assets](https://drive.google.com/file/d/1q_bKerjrwZgHwCw0ovfUMW6He9VtepO_/view?usp=sharing).
-
-## Integrations
-
-Integrations enable upgraded or additional functionality for Next.js Commerce
-
-- [Orama](https://github.com/oramasearch/nextjs-commerce) ([Demo](https://vercel-commerce.oramasearch.com/))
-
-  - Upgrades search to include typeahead with dynamic re-rendering, vector-based similarity search, and JS-based configuration.
-  - Search runs entirely in the browser for smaller catalogs or on a CDN for larger.
-
-- [React Bricks](https://github.com/ReactBricks/nextjs-commerce-rb) ([Demo](https://nextjs-commerce.reactbricks.com/))
-  - Edit pages, product details, and footer content visually using [React Bricks](https://www.reactbricks.com) visual headless CMS.
-
-## Running locally
-
-You will need to use the environment variables [defined in `.env.example`](.env.example) to run Next.js Commerce. It's recommended you use [Vercel Environment Variables](https://vercel.com/docs/concepts/projects/environment-variables) for this, but a `.env` file is all that is necessary.
-
-> Note: You should not commit your `.env` file or it will expose secrets that will allow others to control your Shopify store.
-
-1. Install Vercel CLI: `npm i -g vercel`
-2. Link local instance with Vercel and GitHub accounts (creates `.vercel` directory): `vercel link`
-3. Download your environment variables: `vercel env pull`
+## Installation
 
 ```bash
 pnpm install
-pnpm dev
+cp .env.example .env
+pnpm db:generate
+pnpm db:migrate
+pnpm db:seed
 ```
 
-Your app should now be running on [localhost:3000](http://localhost:3000/).
+Development admin credentials:
 
-<details>
-  <summary>Expand if you work at Vercel and want to run locally and / or contribute</summary>
+- Email: `admin@temmuzonline.com`
+- Password: `TemmuzOnline!2026`
 
-1. Run `vc link`.
-1. Select the `Vercel Solutions` scope.
-1. Connect to the existing `commerce-shopify` project.
-1. Run `vc env pull` to get environment variables.
-1. Run `pnpm dev` to ensure everything is working correctly.
-</details>
+Production'da seed şifresini ve tüm secret değerlerini mutlaka değiştirin.
 
-## Vercel, Next.js Commerce, and Shopify Integration Guide
+## Development
 
-You can use this comprehensive [integration guide](https://vercel.com/docs/integrations/ecommerce/shopify) with step-by-step instructions on how to configure Shopify as a headless CMS using Next.js Commerce as your headless Shopify storefront on Vercel.
+```bash
+pnpm --filter @temmuz/api dev
+pnpm --filter @temmuz/admin dev
+pnpm --filter @temmuz/widget dev
+```
+
+## Docker
+
+```bash
+docker compose up -d
+```
+
+Servisler:
+
+- API: <http://localhost:4000>
+- Admin: <http://localhost:3000>
+- Widget static build: <http://localhost:8080/widget.js>
+- Nginx: <http://localhost>
+
+## Database migration and seed
+
+```bash
+pnpm db:migrate
+pnpm db:seed
+```
+
+Seed 1 admin, 2 agent, 3 visitor, 3 conversation ve örnek mesajları oluşturur.
+
+## Widget installation
+
+İkas özel kod alanına veya herhangi bir web sitesine ekleyin:
+
+```html
+<script
+  src="https://support.temmuzonline.com/widget.js"
+  data-site-id="temmuz-online"
+  data-api-url="https://api.support.temmuzonline.com"
+></script>
+```
+
+Widget `localStorage` içinde sadece anonim `visitor_xxx` kimliğini saklar. IP adresi kalıcı olarak saklanmaz. Ürün bilgisi sırasıyla JSON-LD Product, OpenGraph ve DOM fallback üzerinden algılanır.
+
+## REST API
+
+- `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`
+- `GET /visitors`, `GET /visitors/:id`
+- `GET /conversations`, `GET /conversations/:id`, `POST /conversations/:id/close`
+- `GET /conversations/:id/messages`, `POST /conversations/:id/messages`
+- `GET/POST/PUT/DELETE /quick-replies`
+- `POST /widget/session`, `POST /widget/heartbeat`, `POST /widget/pageview`
+- `GET /health`
+
+Standart hata formatı:
+
+```json
+{ "success": false, "error": { "code": "...", "message": "..." } }
+```
+
+## WebSocket events
+
+- Visitor: `visitor:update`, `visitor:pageview`
+- Conversation: `conversation:created`, `conversation:updated`
+- Message: `message:new`
+- Agent: `agent:online`
+
+Socket.IO reconnect client tarafında aktiftir. Mesajlar server-side PostgreSQL'e yazılır ve `clientMessageId` unique constraint ile duplicate azaltılır.
+
+## Security
+
+- Password hash: bcrypt.
+- Auth cookie: HttpOnly, SameSite=Lax, production'da Secure.
+- Validation: Zod.
+- Security headers: Helmet.
+- Rate limit: Fastify rate limit, login brute-force limiti.
+- CORS allow-list environment üzerinden.
+- XSS: Admin/widget mesajları text node/React escaping ile render eder, HTML injection yapılmaz.
+- KVKK: anonim visitor, minimum veri, IP kalıcı saklama yok.
+
+## Production deployment
+
+1. `JWT_SECRET` ve `SESSION_SECRET` için güçlü rastgele değer üretin.
+2. PostgreSQL yedekleme planı kurun (`pg_dump`, PITR veya managed backup).
+3. Nginx önüne Let's Encrypt veya kurumsal SSL ekleyin.
+4. `CORS_ORIGIN` değerini sadece Temmuz Online ve admin domainleriyle sınırlandırın.
+5. Varsayılan seed admin şifresini değiştirin.
+
+## Testing
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+docker compose config
+```
+
+E2E senaryoları `tests/e2e` altında genişletilecek Playwright yapısı için ayrılmıştır.
+
+## Troubleshooting
+
+- `DATABASE_URL` yoksa config validation API başlangıcını durdurur.
+- Admin listeleri boşsa `pnpm db:seed` çalıştırın.
+- Widget bağlanmıyorsa `data-api-url`, CORS ve Nginx WebSocket proxy ayarlarını kontrol edin.
+- Production'da HTTPS yoksa secure cookie ve browser notification davranışları sınırlı olabilir.

@@ -1,34 +1,26 @@
 {
   "private": true,
+  "packageManager": "pnpm@10.28.1",
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start",
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
     "prettier": "prettier --write --ignore-unknown .",
     "prettier:check": "prettier --check --ignore-unknown .",
-    "test": "pnpm prettier:check"
-  },
-  "dependencies": {
-    "@headlessui/react": "^2.2.0",
-    "@heroicons/react": "^2.2.0",
-    "clsx": "^2.1.1",
-    "geist": "^1.3.1",
-    "next": "15.3.0-canary.13",
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
-    "sonner": "^2.0.1"
+    "db:generate": "pnpm --filter @temmuz/database prisma:generate",
+    "db:migrate": "pnpm --filter @temmuz/database prisma:migrate",
+    "db:seed": "pnpm --filter @temmuz/database seed",
+    "e2e": "playwright test"
   },
   "devDependencies": {
-    "@tailwindcss/container-queries": "^0.1.1",
-    "@tailwindcss/postcss": "^4.0.14",
-    "@tailwindcss/typography": "^0.5.16",
-    "@types/node": "22.13.10",
-    "@types/react": "19.0.12",
-    "@types/react-dom": "19.0.4",
-    "postcss": "^8.5.3",
-    "prettier": "3.5.3",
-    "prettier-plugin-tailwindcss": "^0.6.11",
-    "tailwindcss": "^4.0.14",
-    "typescript": "5.8.2"
+    "@eslint/js": "^9.33.0",
+    "eslint": "^9.33.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.39.0",
+    "vitest": "^3.2.4",
+    "@playwright/test": "^1.54.2"
   }
 }
