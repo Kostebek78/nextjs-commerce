@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Site Audit HTML Önizleme</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        background: #f7f7fb;
+        color: #111;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 40px auto;
+        padding: 0 16px;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 16px;
+        margin-top: 12px;
+      }
+      input,
+      button,
+      select {
+        font-size: 14px;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #d1d5db;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      button {
+        background: #2563eb;
+        color: white;
+        border: 0;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 8px;
+      }
+      .item {
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 12px;
+        margin-top: 8px;
+      }
+      .tag {
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        border-radius: 999px;
+        padding: 4px 8px;
+      }
+      .yuksek {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .orta {
+        background: #fef3c7;
+        color: #92400e;
+      }
+      .dusuk {
+        background: #dcfce7;
+        color: #166534;
+      }
+      .muted {
+        color: #6b7280;
+        font-size: 13px;
+      }
+      h1 {
+        margin-bottom: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Site Audit - HTML Önizleme</h1>
+      <p class="muted">
+        Web site adresini girin, sonra checklist veya kampanya planını görün.
+      </p>
+
+      <form id="form" class="card">
+        <div class="row">
+          <input id="website" placeholder="https://ornek.com" required />
+          <select id="mode">
+            <option value="checklist">Checklist</option>
+            <option value="campaign">Kampanya</option>
+          </select>
+          <button id="submitBtn" type="submit">Siteyi Tara</button>
+        </div>
+        <p class="muted" style="margin-top: 10px">
+          Bu dosyayı <b>/site-audit-preview.html</b> olarak açabilirsiniz.
+        </p>
+      </form>
+
+      <div id="error" class="card" style="display: none; color: #b91c1c"></div>
+      <div id="summary" class="card" style="display: none"></div>
+      <div id="results"></div>
+    </div>
+
+    <script>
+      const form = document.getElementById("form");
+      const websiteInput = document.getElementById("website");
+      const modeInput = document.getElementById("mode");
+      const errorBox = document.getElementById("error");
+      const summaryBox = document.getElementById("summary");
+      const resultsBox = document.getElementById("results");
+      const submitBtn = document.getElementById("submitBtn");
+
+      const priorityClass = (value) =>
+        ({ yüksek: "yuksek", orta: "orta", düşük: "dusuk" })[value] || "orta";
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        errorBox.style.display = "none";
+        summaryBox.style.display = "none";
+        resultsBox.innerHTML = "";
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Taranıyor...";
+
+        try {
+          const response = await fetch("/api/site-audit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ websiteUrl: websiteInput.value }),
+          });
+
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Tarama başarısız");
+
+          summaryBox.style.display = "block";
+          summaryBox.innerHTML = `<div><b>Taranan:</b> ${data.scannedUrl}</div><div class="muted" style="margin-top:8px">${data.summary}</div>`;
+
+          if (modeInput.value === "checklist") {
+            data.checklist.forEach((item) => {
+              const node = document.createElement("div");
+              node.className = "card item";
+              node.innerHTML = `
+                <div><span class="tag ${priorityClass(item.priority)}">${item.priority}</span> <span class="muted">${item.role}</span></div>
+                <div style="font-weight:700;margin-top:8px">${item.title}</div>
+                <div class="muted" style="margin-top:4px">${item.detail}</div>
+              `;
+              resultsBox.appendChild(node);
+            });
+          } else {
+            data.campaigns.forEach((campaign) => {
+              const node = document.createElement("div");
+              node.className = "card item";
+              node.innerHTML = `
+                <div style="font-weight:700">${campaign.channel}</div>
+                <div class="muted" style="margin-top:8px"><b>Neden:</b> ${campaign.why}</div>
+                <div class="muted" style="margin-top:6px"><b>En az bütçeyle aksiyon:</b> ${campaign.lowBudgetAction}</div>
+                <div class="muted" style="margin-top:6px"><b>Nasıl kurulur:</b> ${campaign.setup}</div>
+              `;
+              resultsBox.appendChild(node);
+            });
+          }
+        } catch (error) {
+          errorBox.style.display = "block";
+          errorBox.textContent = error.message || "Bilinmeyen hata";
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Siteyi Tara";
+        }
+      });
+    </script>
+  </body>
+</html>
